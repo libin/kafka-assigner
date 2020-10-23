@@ -2,6 +2,8 @@ package siftscience.kafka.tools;
 
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -166,18 +168,44 @@ public class KafkaAssignmentStrategy {
         // replicas than nodes are equally likely to be assigned anywhere (and not overload the
         // brokers with earlier IDs).
         Integer[] nodeProcessingOrder = getNodeProcessingOrder(topicName, nodeMap.keySet());
-        List<Integer> nodeProcessingOrderList = Arrays.asList(nodeProcessingOrder);
+        List<Integer> nodeProcessingOrderList = new ArrayList<>(Arrays.asList(nodeProcessingOrder));
+
+        for(Iterator<Integer> nodeIt = nodeProcessingOrderList.iterator(); nodeIt.hasNext();){
+          Node node = nodeMap.get(nodeIt.next());
+          if (node.freeSpots() == 0)
+            nodeIt.remove();
+        }
 
         // Assign unassigned replicas to nodes that can accept them
         for (Map.Entry<Integer, Integer> e : orphanedReplicas.entrySet()) {
             int partition = e.getKey();
             int remainingReplicas = e.getValue();
+
+            List<int[]> a = new ArrayList<int[]>();
+            for (int nodeId : nodeProcessingOrderList) {
+              int[] aa = {nodeId, nodeMap.get(nodeId).freeSpots()};
+              Collections.addAll(a, aa);
+            }
+            Collections.sort(a, (o1, o2) -> {
+              if (o1[1] < o2[1])
+                return 1;
+              if (o1[1] > o2[1])
+                return -1;
+              return 0;
+            });
+            nodeProcessingOrderList = new ArrayList<Integer>();
+            for (int[] aa : a) {
+              nodeProcessingOrderList.add(aa[0]);
+            }
+
             Iterator<Integer> nodeIt = nodeProcessingOrderList.iterator();
             while (nodeIt.hasNext() && remainingReplicas > 0) {
                 Node node = nodeMap.get(nodeIt.next());
                 if (node.canAccept(partition)) {
                     node.accept(partition);
                     remainingReplicas--;
+                    if (node.freeSpots() == 0)
+                      nodeIt.remove();
                 }
             }
             Preconditions.checkState(remainingReplicas == 0, "Partition " + partition +
@@ -328,6 +356,14 @@ public class KafkaAssignmentStrategy {
                     "Attempted to accept unacceptable partition " + partition);
             assignedPartitions.add(partition);
             rack.accept(partition);
+        }
+
+        public String toString() {
+          return Integer.toString(id) + " [" + Integer.toString(assignedPartitions.size()) + "/" +Integer.toString(capacity) + "] " + assignedPartitions.toString();
+        }
+
+        public int freeSpots() {
+          return capacity - assignedPartitions.size();
         }
     }
 
